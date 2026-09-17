@@ -1,11 +1,10 @@
 from pathlib import Path
 
 def load_wordlist(filename):
-    path = Path(filename)
+    path = Path(filename).expanduser()
     if not path.is_file():
-        raise FileNotFoundError(filename)
-    values = []
-    seen = set()
+        raise FileNotFoundError(str(path))
+    values, seen = [], set()
     with path.open("r", encoding="utf-8", errors="ignore") as fh:
         for line in fh:
             value = line.strip()
