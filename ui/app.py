@@ -44,7 +44,7 @@ def ask(prompt, default=None, secret=False):
     prompt_text.append(suffix, style="dim")
     prompt_text.append(": ", style="bold cyan")
     value = console.input(prompt_text, password=secret)
-    return value if value else (default or "")
+    return value if value else (default if default is not None else "")
 
 def target_config():
     clear()
