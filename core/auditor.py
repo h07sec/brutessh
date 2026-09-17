@@ -2,56 +2,45 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-
 from .ssh import test_credentials
 
 RESULTS = Path(__file__).resolve().parent.parent / "results"
-RESULTS.mkdir(parents=True, exist_ok=True)
+RESULTS.mkdir(exist_ok=True)
 
 
-def audit_passwords(
-    host, port, username, passwords, timeout, delay, max_attempts, on_attempt
-):
-    return _audit(
-        host,
-        port,
-        passwords,
-        timeout,
-        delay,
-        max_attempts,
-        on_attempt,
-        fixed_username=username,
+def audit_passwords(host, port, username, passwords, timeout, delay, max_attempts, on_attempt):
+    """Test one known username against a password list."""
+    return _audit_pairs(
+        host, port, [(username, password) for password in passwords],
+        timeout, delay, max_attempts, on_attempt
     )
 
 
-def audit_usernames(
-    host, port, password, usernames, timeout, delay, max_attempts, on_attempt
-):
-    return _audit(
-        host,
-        port,
-        usernames,
-        timeout,
-        delay,
-        max_attempts,
-        on_attempt,
-        fixed_password=password,
+def audit_usernames(host, port, password, usernames, timeout, delay, max_attempts, on_attempt):
+    """Test a username list against one known password."""
+    return _audit_pairs(
+        host, port, [(username, password) for username in usernames],
+        timeout, delay, max_attempts, on_attempt
     )
 
 
-def _audit(
-    host,
-    port,
-    items,
-    timeout,
-    delay,
-    max_attempts,
-    on_attempt,
-    fixed_username=None,
-    fixed_password=None,
-):
+def audit_ssh(host, port, username, usernames, passwords, timeout, delay, max_attempts, on_attempt):
+    """
+    Main SSH brute-force audit.
+
+    If username is supplied, test that username against every password.
+    If username is blank/None, test every username/password combination.
+    """
+    if username:
+        pairs = ((username, password) for password in passwords)
+    else:
+        pairs = ((user, password) for user in usernames for password in passwords)
+    return _audit_pairs(host, port, pairs, timeout, delay, max_attempts, on_attempt)
+
+
+def _audit_pairs(host, port, pairs, timeout, delay, max_attempts, on_attempt):
     started = time.time()
-    limit = min(max_attempts, len(items)) if max_attempts else len(items)
+    limit = max_attempts if max_attempts else None
     result = {
         "status": "not_found",
         "attempts": 0,
@@ -60,32 +49,21 @@ def _audit(
         "password": None,
     }
 
-    for idx, item in enumerate(items[:limit], 1):
-        username = fixed_username if fixed_username is not None else item
-        password = item if fixed_username is not None else fixed_password
-
-        status, error = test_credentials(
-            host, port, username, password, timeout
-        )
-        result["attempts"] = idx
-        result["elapsed"] = time.time() - started
-
-        try:
-            on_attempt(idx, limit, username, status, error)
-        except Exception:
-            # UI callback failures should not destroy the audit result.
-            pass
-
-        if status == "success":
-            result.update(
-                status="success", username=username, password=password
-            )
+    for username, password in pairs:
+        if limit is not None and result["attempts"] >= limit:
             break
 
+        status, error = test_credentials(host, port, username, password, timeout)
+        result["attempts"] += 1
+        result["elapsed"] = time.time() - started
+        on_attempt(result["attempts"], username, status, error)
+
+        if status == "success":
+            result.update(status="success", username=username, password=password)
+            break
         if status == "error":
             result.update(status="error", error=error)
             break
-
         if delay:
             time.sleep(delay)
 
@@ -99,12 +77,12 @@ def save_result(host, port, result):
         "target": f"{host}:{port}",
         **result,
     }
-    output = RESULTS / f"result_{int(time.time() * 1000)}.json"
-    output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (RESULTS / f"result_{int(time.time() * 1000)}.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
 
 
 def recent_results():
-    RESULTS.mkdir(parents=True, exist_ok=True)
     return sorted(
         RESULTS.glob("result_*.json"),
         key=lambda p: p.stat().st_mtime,
