@@ -1,0 +1,6 @@
+# Example usernames for your authorized lab
+root
+pi
+admin
+user
+test
