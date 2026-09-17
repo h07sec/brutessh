@@ -9,27 +9,24 @@ RESULTS.mkdir(exist_ok=True)
 
 
 def audit_passwords(host, port, username, passwords, timeout, delay, max_attempts, on_attempt):
-    """Test one known username against a password list."""
     return _audit_pairs(
-        host, port, [(username, password) for password in passwords],
+        host, port, ((username, password) for password in passwords),
         timeout, delay, max_attempts, on_attempt
     )
 
 
 def audit_usernames(host, port, password, usernames, timeout, delay, max_attempts, on_attempt):
-    """Test a username list against one known password."""
     return _audit_pairs(
-        host, port, [(username, password) for username in usernames],
+        host, port, ((username, password) for username in usernames),
         timeout, delay, max_attempts, on_attempt
     )
 
 
 def audit_ssh(host, port, username, usernames, passwords, timeout, delay, max_attempts, on_attempt):
-    """
-    Main SSH brute-force audit.
+    """Run an authorized SSH credential audit.
 
-    If username is supplied, test that username against every password.
-    If username is blank/None, test every username/password combination.
+    A supplied username is tested against every password. If username is empty,
+    every username/password combination is tested.
     """
     if username:
         pairs = ((username, password) for password in passwords)
@@ -40,14 +37,21 @@ def audit_ssh(host, port, username, usernames, passwords, timeout, delay, max_at
 
 def _audit_pairs(host, port, pairs, timeout, delay, max_attempts, on_attempt):
     started = time.time()
-    limit = max_attempts if max_attempts else None
+    limit = max_attempts if max_attempts > 0 else None
     result = {
         "status": "not_found",
         "attempts": 0,
         "elapsed": 0,
         "username": None,
         "password": None,
+        "connection_errors": 0,
     }
+
+    # A temporary SSH banner/transport problem should not kill the whole audit.
+    # Stop only after several consecutive transport failures, which usually means
+    # the target is unavailable or port 22 is not actually serving SSH.
+    consecutive_connection_errors = 0
+    max_consecutive_connection_errors = 3
 
     for username, password in pairs:
         if limit is not None and result["attempts"] >= limit:
@@ -56,17 +60,41 @@ def _audit_pairs(host, port, pairs, timeout, delay, max_attempts, on_attempt):
         status, error = test_credentials(host, port, username, password, timeout)
         result["attempts"] += 1
         result["elapsed"] = time.time() - started
+
+        if status == "error":
+            result["connection_errors"] += 1
+            consecutive_connection_errors += 1
+            on_attempt(result["attempts"], username, status, error)
+
+            if consecutive_connection_errors >= max_consecutive_connection_errors:
+                result.update(
+                    status="error",
+                    error=(
+                        f"SSH connection failed {max_consecutive_connection_errors} "
+                        f"times consecutively. Last error: {error}"
+                    ),
+                )
+                break
+
+            # Give a server that is throttling/resetting connections a chance
+            # to recover before the next candidate.
+            if delay:
+                time.sleep(delay)
+            continue
+
+        # A successful authentication or a normal authentication rejection
+        # means the SSH service is responding, so reset the transport-error run.
+        consecutive_connection_errors = 0
         on_attempt(result["attempts"], username, status, error)
 
         if status == "success":
             result.update(status="success", username=username, password=password)
             break
-        if status == "error":
-            result.update(status="error", error=error)
-            break
+
         if delay:
             time.sleep(delay)
 
+    result["elapsed"] = time.time() - started
     save_result(host, port, result)
     return result
 
