@@ -541,14 +541,3 @@ Always obtain appropriate authorization before testing a system.
 
 ---
 
-# License
-
-Add your preferred open-source license here.
-
-For example:
-
-```text
-MIT License
-```
-
-if the project is intended to be released under the MIT License.
