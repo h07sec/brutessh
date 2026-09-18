@@ -27,7 +27,7 @@ def banner():
     title = Text()
     title.append("SSH ", style="bold cyan")
     title.append("AUDITOR", style="bold white")
-    title.append("  v1.1", style="dim")
+    title.append("  by H07SEC", style="dim")
     subtitle = Text("Authorized Security Testing Console", style="bright_black")
     console.print(Panel(Align.center(Group(title, subtitle)),
                         box=box.DOUBLE, padding=(1, 2)))
